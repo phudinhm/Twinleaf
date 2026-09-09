@@ -113,8 +113,17 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const origHtml = escapeHtml(orig).replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br/>");
-        const transHtml = trans ? escapeHtml(trans).replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br/>") : "";
+        const fixSpacing = (str: string) =>
+          str
+            .replace(/([.!?\u2026:;])([A-Z\u00C0-\u024F\u1EA0-\u1EF9\u201C\u0022\u0027\u2018])/gu, "$1 $2")
+            .replace(/([\p{L}\d][.!?\u2026])([\p{L}])/gu, "$1 $2")
+            .replace(/ {2,}/g, " ");
+
+        const cleanOrig = fixSpacing(orig);
+        const cleanTrans = fixSpacing(trans);
+
+        const origHtml = escapeHtml(cleanOrig).replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br/>");
+        const transHtml = cleanTrans ? escapeHtml(cleanTrans).replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br/>") : "";
 
         currentChapterContent += `
           <div class="bilingual-pair">

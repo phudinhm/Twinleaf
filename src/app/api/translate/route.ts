@@ -36,7 +36,11 @@ CRITICAL LITERARY TRANSLATION RULES:
    - Never produce stiff literal ("dịch thô / dịch máy") sentences. Use vivid verbs, rich cultural idioms, and natural rhythm.
    - Preserve metaphors, irony, humor, wit, and distinctive character voices.
 
-3. PRESERVATION & FORMAT:
+3. PUNCTUATION & SPACING (STRICT REQUIREMENT):
+   - ALWAYS ensure proper spacing after punctuation marks: periods (.), commas (,), exclamation marks (!), question marks (?), colons (:), semicolons (;).
+   - NEVER stick the next sentence directly to the period of the previous sentence without a space (e.g. write "câu một. Câu hai", NEVER "câu một.Câu hai").
+
+4. PRESERVATION & FORMAT:
    - Keep proper names (people, kingdoms, cities) consistent and unchanged unless there is a universally accepted convention.
    - Each input passage is separated by "|||".
    - Return EXACTLY the same number of passages, separated by "|||", in the exact same sequence.
@@ -46,35 +50,46 @@ Passages:
 ${texts.join("\n|||\n")}`;
 }
 
+export function fixPunctuationSpacing(text: string): string {
+  if (!text) return text;
+  return text
+    // Fix punctuation immediately followed by letter or quote without space (e.g. "câu trước.Câu sau" -> "câu trước. Câu sau")
+    .replace(/([.!?\u2026:;])([A-Z\u00C0-\u024F\u1EA0-\u1EF9\u201C\u0022\u0027\u2018])/gu, (_m, p1, p2) => p1 + " " + p2)
+    // Fix letter followed by period and letter (e.g. "xong.nhưng" -> "xong. nhưng")
+    .replace(/([\p{L}\d][.!?\u2026])([\p{L}])/gu, (_m, p1, p2) => p1 + " " + p2)
+    .replace(/ {2,}/g, " ");
+}
+
 function parseTranslationResponse(response: string, originalTexts: string[]): string[] {
   const cleaned = response.trim().replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "");
-  const translated = cleaned.split("|||").map((s: string) => s.trim());
+  const translated = cleaned.split("|||").map((s: string) => fixPunctuationSpacing(s.trim()));
   while (translated.length < originalTexts.length) {
     translated.push(originalTexts[translated.length]);
   }
   return translated;
 }
 
-// ── Gemini 2.0 Flash (Fast & Great) ──
+// ── Gemini 3.6 Flash (Fast & Great) ──
 async function translateWithGeminiFlash(texts: string[], targetLang: string): Promise<string[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY not set");
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
   const langName = LANG_NAMES[targetLang] || targetLang;
 
   const result = await model.generateContent(buildTranslationPrompt(texts, langName));
   return parseTranslationResponse(result.response.text(), texts);
 }
 
-// ── Gemini 1.5 Pro / Thinking (Smartest, Deep Context) ──
+// ── Gemini Pro (Thinking / Literary context) ──
 async function translateWithGeminiPro(texts: string[], targetLang: string): Promise<string[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY not set");
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+  // Try gemini-3.6-flash (or pro preview)
+  const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
   const langName = LANG_NAMES[targetLang] || targetLang;
 
   const result = await model.generateContent(buildTranslationPrompt(texts, langName));
@@ -250,7 +265,10 @@ export async function POST(req: NextRequest) {
     // Fallback 2: Google Translate scraper
     try {
       const translatedText = await translate(texts, { to: targetLang || "vi" });
-      return NextResponse.json({ translatedText, provider: "google-translate" });
+      const cleaned = Array.isArray(translatedText)
+        ? translatedText.map((t: string) => fixPunctuationSpacing(t))
+        : fixPunctuationSpacing(translatedText);
+      return NextResponse.json({ translatedText: cleaned, provider: "google-translate" });
     } catch (apiError: any) {
       console.warn("Translation API failed:", apiError.message);
       return NextResponse.json(

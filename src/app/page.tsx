@@ -70,6 +70,14 @@ export default function Home() {
 
   const handleDragLeave = useCallback(() => setIsDragging(false), []);
 
+  const fixSpacing = (text: string): string => {
+    if (!text) return text;
+    return text
+      .replace(/([.!?\u2026:;])([A-Z\u00C0-\u024F\u1EA0-\u1EF9\u201C\u0022\u0027\u2018])/gu, "$1 $2")
+      .replace(/([\p{L}\d][.!?\u2026])([\p{L}])/gu, "$1 $2")
+      .replace(/ {2,}/g, " ");
+  };
+
   const handleUploadAndParse = async () => {
     if (!file) return;
     setIsUploading(true);
@@ -92,9 +100,12 @@ export default function Home() {
       setCover(data.cover || null);
 
       const rawChunks = data.markdown.split(/\n\n+/);
-      const initialChunks: BookChunk[] = rawChunks.map((text: string) => ({
-        original: text,
-      }));
+      const initialChunks: BookChunk[] = rawChunks
+        .map((text: string) => ({
+          original: fixSpacing(text.trim()),
+        }))
+        .filter((c: BookChunk) => c.original.length > 0);
+
       setChunks(initialChunks);
       setIsUploading(false);
       translateChunks(initialChunks);
@@ -158,7 +169,7 @@ export default function Home() {
           batch.indices.forEach((chunkIdx, arrayIdx) => {
             currentChunks[chunkIdx] = {
               ...currentChunks[chunkIdx],
-              translated: translations[arrayIdx] ?? "[Missing]",
+              translated: fixSpacing(translations[arrayIdx] ?? "[Missing]"),
             };
             completed++;
           });
