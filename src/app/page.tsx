@@ -30,7 +30,7 @@ interface BookChunk {
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [targetLang, setTargetLang] = useState("vi");
-  const [engine, setEngine] = useState("gemini-pro");
+  const [engine, setEngine] = useState("qwen");
   const [isUploading, setIsUploading] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [title, setTitle] = useState("");
@@ -312,11 +312,11 @@ export default function Home() {
                   onChange={(e) => setEngine(e.target.value)}
                   className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2.5 text-sm text-stone-700 shadow-sm focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 outline-none transition font-medium"
                 >
-                  <option value="gemini-pro">🌟 Gemini 1.5 Pro (Văn học sâu sắc)</option>
-                  <option value="deepseek">🧠 DeepSeek V3 (Giàu cảm xúc)</option>
-                  <option value="gemini">✨ Gemini 2.0 Flash (Nhanh & Tự nhiên)</option>
-                  <option value="groq">⚡ Groq Llama 3.3 70B (Siêu tốc)</option>
-                  <option value="claude">👑 Claude 3.5 Sonnet (Đỉnh cao)</option>
+                  <option value="qwen">🌸 Qwen 3.8 (Groq) — Dịch văn học thơ mộng nhất (Siêu tốc)</option>
+                  <option value="groq-gpt">🌟 GPT-OSS 120B (Groq) — Trí tuệ 120B tham số (Siêu tốc)</option>
+                  <option value="gemini">⚡ Gemini 3.6 Flash (Google AI) — Tự nhiên & Hiện đại</option>
+                  <option value="deepseek">🧠 DeepSeek V3 (Cần số dư tài khoản)</option>
+                  <option value="claude">👑 Claude 3.5 Sonnet (Đỉnh cao thế giới)</option>
                   <option value="openai">🤖 OpenAI GPT-4o</option>
                   <option value="google">🔤 Google Translate (Cơ bản)</option>
                 </select>

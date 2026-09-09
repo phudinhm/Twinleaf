@@ -127,8 +127,8 @@ async function translateWithDeepSeek(texts: string[], targetLang: string): Promi
   return parseTranslationResponse(data.choices[0].message.content, texts);
 }
 
-// ── Groq (Llama 3.3 70B - Lightning Fast) ──
-async function translateWithGroq(texts: string[], targetLang: string): Promise<string[]> {
+// ── Groq Qwen (Top Literary Asian/Multilingual Model - Lightning Fast) ──
+async function translateWithGroqQwen(texts: string[], targetLang: string): Promise<string[]> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("GROQ_API_KEY not set");
 
@@ -141,9 +141,9 @@ async function translateWithGroq(texts: string[], targetLang: string): Promise<s
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
+      model: "qwen/qwen3.8-27b",
       messages: [
-        { role: "system", content: "You are a master literary translator." },
+        { role: "system", content: "You are an award-winning literary translator and novelist." },
         { role: "user", content: buildTranslationPrompt(texts, langName) },
       ],
       temperature: 0.3,
@@ -152,7 +152,38 @@ async function translateWithGroq(texts: string[], targetLang: string): Promise<s
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Groq API error (${res.status}): ${errText}`);
+    throw new Error(`Groq Qwen API error (${res.status}): ${errText}`);
+  }
+  const data = await res.json();
+  return parseTranslationResponse(data.choices[0].message.content, texts);
+}
+
+// ── Groq GPT-OSS 120B (Massive 120B Open Foundation Model) ──
+async function translateWithGroqGPT(texts: string[], targetLang: string): Promise<string[]> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("GROQ_API_KEY not set");
+
+  const langName = LANG_NAMES[targetLang] || targetLang;
+
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "openai/gpt-oss-120b",
+      messages: [
+        { role: "system", content: "You are an award-winning literary translator and novelist." },
+        { role: "user", content: buildTranslationPrompt(texts, langName) },
+      ],
+      temperature: 0.3,
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Groq GPT-OSS API error (${res.status}): ${errText}`);
   }
   const data = await res.json();
   return parseTranslationResponse(data.choices[0].message.content, texts);
@@ -223,10 +254,12 @@ async function translateWithOpenAI(texts: string[], targetLang: string): Promise
 }
 
 const ENGINE_FNS: Record<string, (texts: string[], lang: string) => Promise<string[]>> = {
+  qwen: translateWithGroqQwen,
+  groq: translateWithGroqQwen,
+  "groq-gpt": translateWithGroqGPT,
   gemini: translateWithGeminiFlash,
   "gemini-pro": translateWithGeminiPro,
   deepseek: translateWithDeepSeek,
-  groq: translateWithGroq,
   claude: translateWithClaude,
   openai: translateWithOpenAI,
 };
