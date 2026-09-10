@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   UploadCloud,
@@ -12,19 +12,25 @@ import {
   ChevronUp,
   Columns,
   AlignJustify,
-  Moon,
-  Sun,
-  Type,
-  Sparkles,
   Sliders,
+  Sparkles,
+  Search,
+  Volume2,
+  List,
+  Copy,
+  Check,
+  X,
+  FileText,
 } from "lucide-react";
 
 type Theme = "sand" | "sepia" | "white" | "dark";
 type LayoutMode = "interlinear" | "columns" | "translated_only" | "original_only";
 
 interface BookChunk {
+  id: number;
   original: string;
   translated?: string;
+  isHeading?: boolean;
 }
 
 export default function Home() {
@@ -33,6 +39,7 @@ export default function Home() {
   const [engine, setEngine] = useState("qwen");
   const [isUploading, setIsUploading] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [cover, setCover] = useState<string | null>(null);
@@ -40,12 +47,18 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Reader customization state
+  // Reader customization
   const [theme, setTheme] = useState<Theme>("sand");
   const [layout, setLayout] = useState<LayoutMode>("interlinear");
   const [fontSize, setFontSize] = useState(18);
   const [fontFamily, setFontFamily] = useState<"serif" | "sans">("serif");
   const [showSettings, setShowSettings] = useState(false);
+  const [showToc, setShowToc] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+  const [activeChunkId, setActiveChunkId] = useState<number | null>(null);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [speakingId, setSpeakingId] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const readerRef = useRef<HTMLDivElement>(null);
@@ -75,7 +88,8 @@ export default function Home() {
     return text
       .replace(/([.!?\u2026:;])([A-Z\u00C0-\u024F\u1EA0-\u1EF9\u201C\u0022\u0027\u2018])/gu, "$1 $2")
       .replace(/([\p{L}\d][.!?\u2026])([\p{L}])/gu, "$1 $2")
-      .replace(/ {2,}/g, " ");
+      .replace(/ {2,}/g, " ")
+      .trim();
   };
 
   const handleUploadAndParse = async () => {
@@ -100,11 +114,18 @@ export default function Home() {
       setCover(data.cover || null);
 
       const rawChunks = data.markdown.split(/\n\n+/);
+      let idCounter = 0;
       const initialChunks: BookChunk[] = rawChunks
-        .map((text: string) => ({
-          original: fixSpacing(text.trim()),
-        }))
-        .filter((c: BookChunk) => c.original.length > 0);
+        .map((text: string) => {
+          const cleaned = fixSpacing(text);
+          if (!cleaned) return null;
+          return {
+            id: idCounter++,
+            original: cleaned,
+            isHeading: cleaned.startsWith("#"),
+          };
+        })
+        .filter((c: BookChunk | null): c is BookChunk => c !== null);
 
       setChunks(initialChunks);
       setIsUploading(false);
@@ -209,10 +230,8 @@ export default function Home() {
       if (needsRetry) {
         const failed = wave.filter((_, i) => results[i].status === "rejected");
         allBatches.splice(w + PARALLEL, 0, ...failed);
-        // Wait 10s for token limit cooldown before retrying
         await new Promise((r) => setTimeout(r, 10000));
       } else {
-        // Natural small delay between requests to stay well within limits
         await new Promise((r) => setTimeout(r, 600));
       }
     }
@@ -221,6 +240,7 @@ export default function Home() {
   };
 
   const handleExport = async () => {
+    setIsExporting(true);
     try {
       const res = await fetch("/api/export", {
         method: "POST",
@@ -245,6 +265,8 @@ export default function Home() {
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
       alert("Export failed: " + err.message);
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -263,43 +285,109 @@ export default function Home() {
     readerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Theme styles helper
+  const scrollToChunk = (id: number) => {
+    setShowToc(false);
+    const el = document.getElementById(`chunk-${id}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setActiveChunkId(id);
+    }
+  };
+
+  const handleCopyPair = (orig: string, trans?: string, id?: number) => {
+    const text = trans ? `${orig}\n\n${trans}` : orig;
+    navigator.clipboard.writeText(text);
+    if (id !== undefined) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
+
+  const handleSpeak = (text: string, lang: string, id: number) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    if (speakingId === id) {
+      window.speechSynthesis.cancel();
+      setSpeakingId(null);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang === "vi" ? "vi-VN" : "en-US";
+    utterance.onend = () => setSpeakingId(null);
+    utterance.onerror = () => setSpeakingId(null);
+    setSpeakingId(id);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Table of contents items
+  const tableOfContents = useMemo(() => {
+    return chunks
+      .filter((c) => c.isHeading || c.original.toLowerCase().startsWith("chapter"))
+      .map((c) => ({
+        id: c.id,
+        title: c.original.replace(/^#+\s*/, "").slice(0, 60),
+      }));
+  }, [chunks]);
+
+  // Total words & estimated reading time
+  const readingStats = useMemo(() => {
+    const totalWords = chunks.reduce((acc, c) => acc + c.original.split(/\s+/).length, 0);
+    const estMinutes = Math.max(1, Math.round(totalWords / 200));
+    return { totalWords, estMinutes };
+  }, [chunks]);
+
+  // Filtered chunks based on search query
+  const filteredChunks = useMemo(() => {
+    if (!searchQuery.trim()) return chunks;
+    const q = searchQuery.toLowerCase();
+    return chunks.filter(
+      (c) =>
+        c.original.toLowerCase().includes(q) ||
+        (c.translated && c.translated.toLowerCase().includes(q))
+    );
+  }, [chunks, searchQuery]);
+
+  // Theme palettes
   const themeStyles = {
     sand: {
       bg: "#faf8f5",
-      headerBg: "rgba(255, 255, 255, 0.85)",
+      headerBg: "rgba(255, 255, 255, 0.9)",
       headerBorder: "#e8ded0",
       originalText: "#2c2418",
-      translatedText: "#8c755c",
+      translatedText: "#7e664e",
       quoteBorder: "#dccdbb",
       cardBg: "#f2ecdf",
+      highlightBg: "rgba(225, 215, 198, 0.35)",
     },
     sepia: {
       bg: "#f5ede0",
-      headerBg: "rgba(246, 239, 226, 0.9)",
+      headerBg: "rgba(245, 237, 224, 0.95)",
       headerBorder: "#e2d2ba",
       originalText: "#332617",
-      translatedText: "#886f4e",
+      translatedText: "#846c4d",
       quoteBorder: "#d9c4a8",
       cardBg: "#ebdfcc",
+      highlightBg: "rgba(217, 196, 168, 0.35)",
     },
     white: {
       bg: "#ffffff",
-      headerBg: "rgba(255, 255, 255, 0.9)",
+      headerBg: "rgba(255, 255, 255, 0.95)",
       headerBorder: "#e2e8f0",
       originalText: "#0f172a",
-      translatedText: "#64748b",
+      translatedText: "#475569",
       quoteBorder: "#cbd5e1",
       cardBg: "#f8fafc",
+      highlightBg: "rgba(241, 245, 249, 0.8)",
     },
     dark: {
       bg: "#121214",
-      headerBg: "rgba(24, 24, 27, 0.9)",
+      headerBg: "rgba(22, 22, 26, 0.95)",
       headerBorder: "#27272a",
       originalText: "#f1f5f9",
       translatedText: "#94a3b8",
       quoteBorder: "#3f3f46",
       cardBg: "#1c1c20",
+      highlightBg: "rgba(39, 39, 42, 0.5)",
     },
   }[theme];
 
@@ -308,15 +396,15 @@ export default function Home() {
   // ───────────────────────────────────────────────
   if (chunks.length === 0) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-100 flex items-center justify-center p-4">
+      <main className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50/25 to-stone-100 flex items-center justify-center p-4">
         <div className="w-full max-w-xl space-y-6">
           {/* Logo & Header */}
           <div className="text-center">
             <div className="inline-flex items-center gap-2.5 mb-2">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-amber-500 flex items-center justify-center shadow-lg shadow-emerald-200/50">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-amber-500 flex items-center justify-center shadow-lg shadow-emerald-200/50">
                 <Leaf className="w-6 h-6 text-white" />
               </div>
-              <h1 className="text-3xl font-bold tracking-tight text-stone-800">
+              <h1 className="text-3xl font-extrabold tracking-tight text-stone-800">
                 Twinleaf
               </h1>
             </div>
@@ -326,17 +414,17 @@ export default function Home() {
           </div>
 
           {/* Settings Grid */}
-          <div className="bg-white/70 backdrop-blur-md p-4 rounded-2xl border border-stone-200 shadow-sm space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-white/80 backdrop-blur-md p-5 rounded-3xl border border-stone-200/80 shadow-sm space-y-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {/* AI Engine Selection */}
               <div>
-                <label className="block text-xs font-semibold text-stone-500 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">
                   Trí tuệ nhân tạo (AI Engine)
                 </label>
                 <select
                   value={engine}
                   onChange={(e) => setEngine(e.target.value)}
-                  className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2.5 text-sm text-stone-700 shadow-sm focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 outline-none transition font-medium"
+                  className="w-full bg-white border border-stone-200 rounded-xl px-3.5 py-2.5 text-sm text-stone-700 shadow-sm focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 outline-none transition font-medium"
                 >
                   <option value="qwen">🌸 Qwen 3.8 (Groq) — Dịch văn học thơ mộng nhất (Siêu tốc)</option>
                   <option value="groq-gpt">🌟 GPT-OSS 120B (Groq) — Trí tuệ 120B tham số (Siêu tốc)</option>
@@ -351,13 +439,13 @@ export default function Home() {
 
               {/* Language Selection */}
               <div>
-                <label className="block text-xs font-semibold text-stone-500 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-1.5">
                   Ngôn ngữ đích (Translate To)
                 </label>
                 <select
                   value={targetLang}
                   onChange={(e) => setTargetLang(e.target.value)}
-                  className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2.5 text-sm text-stone-700 shadow-sm focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 outline-none transition font-medium"
+                  className="w-full bg-white border border-stone-200 rounded-xl px-3.5 py-2.5 text-sm text-stone-700 shadow-sm focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 outline-none transition font-medium"
                 >
                   <option value="vi">🇻🇳 Tiếng Việt (Vietnamese)</option>
                   <option value="en">🇬🇧 Tiếng Anh (English)</option>
@@ -375,7 +463,7 @@ export default function Home() {
 
           {/* Drag and Drop Zone */}
           <div
-            className={`relative rounded-3xl border-2 border-dashed p-8 text-center cursor-pointer transition-all duration-300 ${
+            className={`relative rounded-3xl border-2 border-dashed p-9 text-center cursor-pointer transition-all duration-300 ${
               isDragging
                 ? "border-emerald-500 bg-emerald-50/80 scale-[1.02] shadow-xl shadow-emerald-100"
                 : file
@@ -421,7 +509,7 @@ export default function Home() {
                   Kéo thả file sách hoặc nhấp để tải lên
                 </p>
                 <p className="text-stone-400 text-xs mt-1.5">
-                  Hỗ trợ định dạng EPUB, MOBI, AZW, AZW3 (Giữ nguyên bìa gốc)
+                  Hỗ trợ định dạng EPUB, MOBI, AZW, AZW3 (Tự động giữ nguyên bìa gốc)
                 </p>
               </div>
             )}
@@ -463,7 +551,7 @@ export default function Home() {
   // ───────────────────────────────────────────────
   return (
     <main
-      className="h-screen flex flex-col transition-colors duration-300"
+      className="h-screen flex flex-col transition-colors duration-300 overflow-hidden"
       style={{ backgroundColor: themeStyles.bg }}
     >
       {/* ── Top Sticky Toolbar ── */}
@@ -474,7 +562,7 @@ export default function Home() {
           borderColor: themeStyles.headerBorder,
         }}
       >
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
           {/* Left: Home & Book Identity */}
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -490,13 +578,15 @@ export default function Home() {
               <img
                 src={cover}
                 alt="Book cover"
-                className="w-7 h-10 object-cover rounded shadow-sm flex-shrink-0 border border-stone-300"
+                className="w-7 h-10 object-cover rounded shadow-sm flex-shrink-0 border border-stone-300 cursor-pointer hover:opacity-80 transition"
+                onClick={() => scrollToTop()}
+                title="Về đầu trang"
               />
             )}
 
             <div className="min-w-0">
               <h1
-                className="text-sm font-bold truncate max-w-xs md:max-w-md"
+                className="text-sm font-bold truncate max-w-[180px] sm:max-w-xs md:max-w-md"
                 style={{ color: themeStyles.originalText }}
               >
                 {title || "Reading Book"}
@@ -504,7 +594,7 @@ export default function Home() {
               <div className="flex items-center gap-2">
                 {isTranslating ? (
                   <div className="flex items-center gap-1.5">
-                    <div className="h-1.5 w-24 bg-stone-200/80 rounded-full overflow-hidden">
+                    <div className="h-1.5 w-20 sm:w-28 bg-stone-200/80 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-300"
                         style={{ width: `${progress}%` }}
@@ -519,20 +609,42 @@ export default function Home() {
                     ✓ Đã dịch xong
                   </span>
                 )}
-                {author && (
-                  <span className="text-[11px] text-stone-400 hidden sm:inline truncate">
-                    • {author}
-                  </span>
-                )}
+                <span className="text-[11px] text-stone-400 hidden md:inline truncate">
+                  • {readingStats.estMinutes} phút đọc ({readingStats.totalWords} từ)
+                </span>
               </div>
             </div>
           </div>
 
           {/* Right: Controls & Actions */}
           <div className="flex items-center gap-2">
+            {/* Table of Contents Button */}
+            {tableOfContents.length > 0 && (
+              <button
+                onClick={() => setShowToc(true)}
+                className="p-2 rounded-xl text-xs font-medium border transition border-stone-200 text-stone-600 hover:bg-stone-100/80"
+                title="Mục lục các chương"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* Search Button */}
+            <button
+              onClick={() => setShowSearch(!showSearch)}
+              className={`p-2 rounded-xl text-xs font-medium border transition ${
+                showSearch
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                  : "border-stone-200 text-stone-600 hover:bg-stone-100/80"
+              }`}
+              title="Tìm kiếm trong sách"
+            >
+              <Search className="w-4 h-4" />
+            </button>
+
             {/* Layout Switcher */}
             <div
-              className="hidden md:flex items-center rounded-xl p-0.5 border"
+              className="hidden lg:flex items-center rounded-xl p-0.5 border"
               style={{
                 backgroundColor: themeStyles.cardBg,
                 borderColor: themeStyles.headerBorder,
@@ -570,7 +682,7 @@ export default function Home() {
               className={`p-2 rounded-xl text-xs font-medium border transition ${
                 showSettings
                   ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                  : "border-stone-200 text-stone-600 hover:bg-stone-100"
+                  : "border-stone-200 text-stone-600 hover:bg-stone-100/80"
               }`}
               title="Tùy chỉnh giao diện đọc"
             >
@@ -580,18 +692,52 @@ export default function Home() {
             {/* Export EPUB Button */}
             <button
               onClick={handleExport}
-              className="px-3.5 py-2 bg-stone-900 text-white hover:bg-stone-800 rounded-xl text-xs font-semibold shadow-sm transition inline-flex items-center gap-1.5"
+              disabled={isExporting}
+              className="px-3.5 py-2 bg-stone-900 text-white hover:bg-stone-800 disabled:opacity-60 rounded-xl text-xs font-semibold shadow-sm transition inline-flex items-center gap-1.5"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Xuất EPUB</span>
+              {isExporting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              <span className="hidden sm:inline">Xuất EPUB</span>
             </button>
           </div>
         </div>
 
+        {/* ── Search Bar Sub-Panel ── */}
+        {showSearch && (
+          <div className="mt-2.5 max-w-6xl mx-auto flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-stone-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Tìm từ khóa trong cả bản gốc và bản dịch..."
+                className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-stone-200 bg-white shadow-sm outline-none focus:ring-2 focus:ring-emerald-500/30"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-2.5 text-stone-400 hover:text-stone-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            {searchQuery && (
+              <span className="text-xs text-stone-500 whitespace-nowrap">
+                Tìm thấy {filteredChunks.length} đoạn
+              </span>
+            )}
+          </div>
+        )}
+
         {/* ── Settings Dropdown Panel ── */}
         {showSettings && (
           <div
-            className="mt-3 pt-3 border-t max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs animate-in fade-in duration-200"
+            className="mt-3 pt-3 border-t max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs animate-in fade-in duration-200"
             style={{ borderColor: themeStyles.headerBorder }}
           >
             {/* Themes */}
@@ -654,7 +800,7 @@ export default function Home() {
                   }
                   className="px-3 py-1.5 border border-stone-200 rounded-lg font-medium hover:bg-stone-100 transition"
                 >
-                  {fontFamily === "serif" ? "Serif" : "Sans"}
+                  {fontFamily === "serif" ? "Bookerly Serif" : "Modern Sans"}
                 </button>
               </div>
             </div>
@@ -690,6 +836,54 @@ export default function Home() {
         )}
       </header>
 
+      {/* ── Table of Contents Drawer ── */}
+      {showToc && (
+        <div className="fixed inset-0 z-40 flex">
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowToc(false)}
+          />
+          <div
+            className="relative w-80 max-w-full h-full shadow-2xl z-50 flex flex-col p-6 animate-in slide-in-from-left duration-200 border-r"
+            style={{
+              backgroundColor: themeStyles.bg,
+              borderColor: themeStyles.headerBorder,
+            }}
+          >
+            <div className="flex items-center justify-between pb-4 border-b mb-4">
+              <h3
+                className="text-base font-bold flex items-center gap-2"
+                style={{ color: themeStyles.originalText }}
+              >
+                <BookOpen className="w-5 h-5 text-emerald-600" />
+                Mục lục sách
+              </h3>
+              <button
+                onClick={() => setShowToc(false)}
+                className="p-1.5 rounded-lg hover:bg-stone-200/50 text-stone-400 hover:text-stone-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+              {tableOfContents.map((item, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => scrollToChunk(item.id)}
+                  className="w-full text-left p-2.5 rounded-xl text-xs font-medium transition flex items-start gap-2 hover:bg-emerald-50 hover:text-emerald-700"
+                  style={{ color: themeStyles.originalText }}
+                >
+                  <span className="w-5 text-stone-400 font-mono text-[11px] flex-shrink-0">
+                    {idx + 1}.
+                  </span>
+                  <span className="line-clamp-2 leading-relaxed">{item.title}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Main Book Reader Area ── */}
       <div
         ref={readerRef}
@@ -698,18 +892,21 @@ export default function Home() {
       >
         <article className="max-w-3xl mx-auto px-6 py-10 md:px-12 md:py-16">
           {/* Book Hero Card (Title & Cover) */}
-          <div className="text-center mb-14 pb-10 border-b" style={{ borderColor: themeStyles.headerBorder }}>
+          <div
+            className="text-center mb-14 pb-10 border-b"
+            style={{ borderColor: themeStyles.headerBorder }}
+          >
             {cover && (
               <div className="inline-block mb-6 relative group">
                 <img
                   src={cover}
                   alt={title}
-                  className="w-36 md:w-44 h-auto rounded-xl shadow-2xl mx-auto object-cover border-2 border-white/60 transform group-hover:scale-105 transition duration-300"
+                  className="w-36 md:w-48 h-auto rounded-2xl shadow-2xl mx-auto object-cover border-4 border-white/80 transform group-hover:scale-105 transition duration-300"
                 />
               </div>
             )}
             <h1
-              className="text-2xl md:text-4xl font-bold tracking-tight mb-2"
+              className="text-2xl md:text-4xl font-bold tracking-tight mb-2 leading-tight"
               style={{
                 color: themeStyles.originalText,
                 fontFamily:
@@ -728,18 +925,23 @@ export default function Home() {
           </div>
 
           {/* Book Content Paragraphs */}
-          <div className="space-y-6">
-            {chunks.map((chunk, idx) => {
+          <div className="space-y-4">
+            {filteredChunks.map((chunk) => {
               const orig = chunk.original.trim();
               const trans = chunk.translated?.trim();
               if (!orig) return null;
 
-              // Check if heading
-              const isHeading = orig.startsWith("#");
+              const isHeading = chunk.isHeading;
+              const isActive = activeChunkId === chunk.id;
 
               if (isHeading) {
                 return (
-                  <div key={idx} className="pt-6 pb-2 text-center">
+                  <div
+                    key={chunk.id}
+                    id={`chunk-${chunk.id}`}
+                    className="pt-8 pb-3 text-center border-b mb-4"
+                    style={{ borderColor: themeStyles.headerBorder }}
+                  >
                     <h2
                       className="text-xl md:text-2xl font-bold tracking-tight"
                       style={{ color: themeStyles.originalText }}
@@ -748,7 +950,7 @@ export default function Home() {
                     </h2>
                     {trans && layout !== "original_only" && (
                       <p
-                        className="text-sm italic mt-1"
+                        className="text-sm italic mt-1.5"
                         style={{ color: themeStyles.translatedText }}
                       >
                         {trans.replace(/^#+\s*/, "")}
@@ -762,10 +964,18 @@ export default function Home() {
               if (layout === "columns") {
                 return (
                   <div
-                    key={idx}
-                    className="grid grid-cols-1 md:grid-cols-2 gap-6 py-2 border-b border-dashed"
-                    style={{ borderColor: themeStyles.headerBorder }}
+                    key={chunk.id}
+                    id={`chunk-${chunk.id}`}
+                    onClick={() => setActiveChunkId(chunk.id)}
+                    className={`grid grid-cols-1 md:grid-cols-2 gap-6 p-3 rounded-2xl transition border-b border-dashed relative group ${
+                      isActive ? "ring-1 ring-emerald-500/40" : ""
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? themeStyles.highlightBg : "transparent",
+                      borderColor: themeStyles.headerBorder,
+                    }}
                   >
+                    {/* Left Column: Original */}
                     <div
                       className="leading-relaxed"
                       style={{
@@ -779,12 +989,15 @@ export default function Home() {
                     >
                       <ReactMarkdown>{chunk.original}</ReactMarkdown>
                     </div>
+
+                    {/* Right Column: Translated */}
                     <div
-                      className="leading-relaxed italic pl-3 border-l-2"
+                      className="leading-relaxed pl-4 border-l-2 relative"
                       style={{
                         color: themeStyles.translatedText,
                         borderColor: themeStyles.quoteBorder,
                         fontSize: `${fontSize - 1}px`,
+                        fontStyle: "italic",
                         fontFamily:
                           fontFamily === "serif"
                             ? "Bookerly, Georgia, serif"
@@ -794,8 +1007,36 @@ export default function Home() {
                       {chunk.translated ? (
                         <ReactMarkdown>{chunk.translated}</ReactMarkdown>
                       ) : isTranslating ? (
-                        <span className="animate-pulse text-xs">Đang dịch...</span>
+                        <span className="animate-pulse text-xs font-mono">Đang dịch...</span>
                       ) : null}
+
+                      {/* Floating Micro-Actions */}
+                      <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition flex items-center gap-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSpeak(chunk.translated || chunk.original, targetLang, chunk.id);
+                          }}
+                          className="p-1 rounded-lg hover:bg-stone-200/50 text-stone-400 hover:text-emerald-700"
+                          title="Đọc to bằng giọng nói"
+                        >
+                          <Volume2 className={`w-3.5 h-3.5 ${speakingId === chunk.id ? "text-emerald-600 animate-pulse" : ""}`} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCopyPair(chunk.original, chunk.translated, chunk.id);
+                          }}
+                          className="p-1 rounded-lg hover:bg-stone-200/50 text-stone-400 hover:text-emerald-700"
+                          title="Sao chép đoạn này"
+                        >
+                          {copiedId === chunk.id ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -803,7 +1044,17 @@ export default function Home() {
 
               // Interlinear & Single-view Layout
               return (
-                <div key={idx} className="group">
+                <div
+                  key={chunk.id}
+                  id={`chunk-${chunk.id}`}
+                  onClick={() => setActiveChunkId(chunk.id)}
+                  className={`p-3 rounded-2xl transition relative group ${
+                    isActive ? "ring-1 ring-emerald-500/40" : ""
+                  }`}
+                  style={{
+                    backgroundColor: isActive ? themeStyles.highlightBg : "transparent",
+                  }}
+                >
                   {/* Original Text */}
                   {layout !== "translated_only" && (
                     <div
@@ -824,7 +1075,7 @@ export default function Home() {
                   {/* Translated Text */}
                   {layout !== "original_only" && chunk.translated && (
                     <div
-                      className="leading-relaxed pl-3.5 border-l-2 mb-5 transition-opacity"
+                      className="leading-relaxed pl-3.5 border-l-2 mb-2 transition-opacity"
                       style={{
                         color: themeStyles.translatedText,
                         borderColor: themeStyles.quoteBorder,
@@ -840,12 +1091,40 @@ export default function Home() {
                   {/* Translating Indicator */}
                   {layout !== "original_only" && !chunk.translated && isTranslating && (
                     <div
-                      className="text-xs mb-4 pl-3.5 animate-pulse font-mono"
+                      className="text-xs mb-2 pl-3.5 animate-pulse font-mono"
                       style={{ color: themeStyles.translatedText }}
                     >
                       ···
                     </div>
                   )}
+
+                  {/* Floating Action Buttons on Hover */}
+                  <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition flex items-center gap-1 bg-white/80 dark:bg-stone-900/80 backdrop-blur-md rounded-lg p-1 shadow-sm border border-stone-200">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSpeak(chunk.translated || chunk.original, targetLang, chunk.id);
+                      }}
+                      className="p-1 rounded hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-500 hover:text-emerald-600"
+                      title="Nghe đọc đoạn này"
+                    >
+                      <Volume2 className={`w-3.5 h-3.5 ${speakingId === chunk.id ? "text-emerald-600 animate-pulse" : ""}`} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopyPair(chunk.original, chunk.translated, chunk.id);
+                      }}
+                      className="p-1 rounded hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-500 hover:text-emerald-600"
+                      title="Sao chép đoạn song ngữ"
+                    >
+                      {copiedId === chunk.id ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -858,10 +1137,15 @@ export default function Home() {
               <p className="text-sm font-medium">Hết sách • Chúc bạn đọc sách vui vẻ</p>
               <button
                 onClick={handleExport}
+                disabled={isExporting}
                 className="mt-4 px-6 py-2.5 bg-stone-800 text-white rounded-xl text-xs font-semibold hover:bg-stone-900 transition shadow-sm inline-flex items-center gap-2"
               >
-                <Download className="w-4 h-4" />
-                Xuất file EPUB (Kèm bìa gốc)
+                {isExporting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                <span>Xuất file EPUB (Kèm bìa gốc chuẩn Kindle)</span>
               </button>
             </div>
           )}

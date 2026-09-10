@@ -1,9 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import epub from "epub-gen-memory";
+import { marked } from "marked";
 
 interface Chunk {
   original: string;
   translated?: string;
+}
+
+function cleanXmlArtifacts(text: string): string {
+  if (!text) return "";
+  return text
+    // Remove XML declarations, DOCTYPE, namespaces
+    .replace(/<\?xml[^>]*\?>/gi, "")
+    .replace(/<!DOCTYPE[^>]*>/gi, "")
+    .replace(/<package[\s\S]*?<\/package>/gi, "")
+    .replace(/<metadata[\s\S]*?<\/metadata>/gi, "")
+    .replace(/<manifest[\s\S]*?<\/manifest>/gi, "")
+    .replace(/<spine[\s\S]*?<\/spine>/gi, "")
+    .replace(/<guide[\s\S]*?<\/guide>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    // Remove XML attributes like xmlns, epub:type
+    .replace(/\s*(xmlns(:[a-z0-9]+)?|xml:lang|epub:type)=["'][^"']*["']/gi, "")
+    // Remove structural wrapper tags that shouldn't appear in text
+    .replace(/<\/?(html|head|body|div|span|section|article|nav|header|footer|aside)[^>]*>/gi, "")
+    // Fix sentence spacing
+    .replace(/([.!?\u2026:;])([A-Z\u00C0-\u024F\u1EA0-\u1EF9\u201C\u0022\u0027\u2018])/gu, "$1 $2")
+    .replace(/([\p{L}\d][.!?\u2026])([\p{L}])/gu, "$1 $2")
+    .replace(/ {2,}/g, " ")
+    .trim();
 }
 
 export async function POST(req: NextRequest) {
@@ -35,15 +60,16 @@ export async function POST(req: NextRequest) {
         margin: 5% 4%;
         font-family: "Bookerly", "Georgia", "Times New Roman", serif;
         line-height: 1.6;
+        color: #111111;
       }
       h1, h2, h3 {
         text-align: center;
-        margin-top: 1.5em;
+        margin-top: 1.8em;
         margin-bottom: 1em;
         font-weight: bold;
       }
       .bilingual-pair {
-        margin-bottom: 1.4em;
+        margin-bottom: 1.5em;
         page-break-inside: avoid;
       }
       .original-text {
@@ -54,22 +80,22 @@ export async function POST(req: NextRequest) {
       .translated-text {
         font-size: 0.9em;
         font-style: italic;
-        color: #555555;
-        padding-left: 0.75em;
-        border-left: 2px solid #bbbbbb;
+        color: #444444;
+        padding-left: 0.8em;
+        border-left: 2px solid #aaaaaa;
         line-height: 1.5;
         margin-top: 0;
-        margin-bottom: 0.5em;
+        margin-bottom: 0.6em;
       }
       hr {
         border: none;
-        border-top: 1px solid #e0e0e0;
+        border-top: 1px solid #cccccc;
         margin: 2em auto;
         width: 60%;
       }
     `;
 
-    // Process chapters to prevent single gigantic chapter (which crashes Kindle/Send-to-Kindle)
+    // Process chapters cleanly
     const chapters: { title: string; content: string }[] = [];
 
     if (Array.isArray(chunks) && chunks.length > 0) {
@@ -79,23 +105,15 @@ export async function POST(req: NextRequest) {
 
       for (let i = 0; i < chunks.length; i++) {
         const item = chunks[i] as Chunk;
-        const orig = (item.original || "").trim();
-        const trans = (item.translated || "").trim();
+        const orig = cleanXmlArtifacts(item.original || "");
+        const trans = cleanXmlArtifacts(item.translated || "");
 
+        // Skip chunks that are empty or purely XML tag remnants
         if (!orig && !trans) continue;
-
-        // Escape HTML entities to avoid XML parsing errors in EPUB
-        const escapeHtml = (str: string) =>
-          str
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
+        if (orig.startsWith("<?xml") || orig.startsWith("<package") || orig.startsWith("<!DOCTYPE")) continue;
 
         // Check if this chunk is a chapter title (starts with #)
         if (orig.startsWith("#")) {
-          // If we already have content, push previous chapter
           if (currentChapterContent.trim()) {
             chapters.push({
               title: `Chapter ${chapterIndex}`,
@@ -106,33 +124,26 @@ export async function POST(req: NextRequest) {
           }
 
           const headingText = orig.replace(/^#+\s*/, "");
-          currentChapterContent += `<h2>${escapeHtml(headingText)}</h2>`;
-          if (trans) {
-            currentChapterContent += `<div class="translated-text"><em>${escapeHtml(trans.replace(/^#+\s*/, ""))}</em></div>`;
+          const transHeading = trans.replace(/^#+\s*/, "");
+          currentChapterContent += `<h2>${marked.parseInline(headingText)}</h2>`;
+          if (transHeading) {
+            currentChapterContent += `<div class="translated-text"><em>${marked.parseInline(transHeading)}</em></div>`;
           }
           continue;
         }
 
-        const fixSpacing = (str: string) =>
-          str
-            .replace(/([.!?\u2026:;])([A-Z\u00C0-\u024F\u1EA0-\u1EF9\u201C\u0022\u0027\u2018])/gu, "$1 $2")
-            .replace(/([\p{L}\d][.!?\u2026])([\p{L}])/gu, "$1 $2")
-            .replace(/ {2,}/g, " ");
-
-        const cleanOrig = fixSpacing(orig);
-        const cleanTrans = fixSpacing(trans);
-
-        const origHtml = escapeHtml(cleanOrig).replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br/>");
-        const transHtml = cleanTrans ? escapeHtml(cleanTrans).replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br/>") : "";
+        // Parse markdown formatting (bold, italics) into clean HTML without escaping tags into &lt;
+        const origParsed = marked.parseInline(orig);
+        const transParsed = trans ? marked.parseInline(trans) : "";
 
         currentChapterContent += `
           <div class="bilingual-pair">
-            <p class="original-text">${origHtml}</p>
-            ${transHtml ? `<p class="translated-text">${transHtml}</p>` : ""}
+            <p class="original-text">${origParsed}</p>
+            ${transParsed ? `<p class="translated-text">${transParsed}</p>` : ""}
           </div>
         `;
 
-        // Split chapter every ~40 paragraphs
+        // Split into new chapter every 40 paragraphs
         if ((i + 1) % PARAGRAPHS_PER_CHAPTER === 0 && currentChapterContent.trim()) {
           chapters.push({
             title: `Chapter ${chapterIndex}`,
@@ -150,10 +161,10 @@ export async function POST(req: NextRequest) {
         });
       }
     } else if (markdown) {
-      // Fallback if raw markdown string is passed
+      const cleanMd = cleanXmlArtifacts(markdown);
       chapters.push({
         title: bookTitle,
-        content: `<div>${markdown.replace(/\n\n/g, "<br/><br/>")}</div>`,
+        content: marked.parse(cleanMd) as string,
       });
     }
 
@@ -186,9 +197,11 @@ export async function POST(req: NextRequest) {
         "Content-Disposition": `attachment; filename="${encodeURIComponent(bookTitle)}.epub"`,
       },
     });
-
   } catch (error: any) {
     console.error("Export error:", error);
-    return NextResponse.json({ error: error.message || "Failed to generate EPUB" }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || "Failed to generate EPUB" },
+      { status: 500 }
+    );
   }
 }

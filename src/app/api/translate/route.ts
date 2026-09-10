@@ -151,6 +151,10 @@ async function translateWithGroqQwen(texts: string[], targetLang: string): Promi
   });
 
   if (!res.ok) {
+    if (res.status === 429) {
+      console.log("Qwen rate limited, auto-switching to Groq GPT-OSS 120B...");
+      return translateWithGroqGPT(texts, targetLang);
+    }
     const errText = await res.text();
     throw new Error(`Groq Qwen API error (${res.status}): ${errText}`);
   }

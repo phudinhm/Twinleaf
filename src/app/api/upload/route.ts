@@ -135,6 +135,23 @@ function extractMobiCover(buf: Buffer): string | null {
   return null;
 }
 
+function cleanRawEbookMarkdown(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/<\?xml[^>]*\?>/gi, "")
+    .replace(/<!DOCTYPE[^>]*>/gi, "")
+    .replace(/<package[\s\S]*?<\/package>/gi, "")
+    .replace(/<metadata[\s\S]*?<\/metadata>/gi, "")
+    .replace(/<manifest[\s\S]*?<\/manifest>/gi, "")
+    .replace(/<spine[\s\S]*?<\/spine>/gi, "")
+    .replace(/<guide[\s\S]*?<\/guide>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/\s*(xmlns(:[a-z0-9]+)?|xml:lang|epub:type)=["'][^"']*["']/gi, "")
+    .replace(/<\/?(html|head|body|div|span|section|article|nav|header|footer|aside)[^>]*>/gi, "")
+    .trim();
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -175,8 +192,10 @@ export async function POST(req: NextRequest) {
     const title = detectedTitle || fallbackTitle;
     const author = detectedAuthor || "Unknown Author";
 
+    const cleanedMarkdown = cleanRawEbookMarkdown(markdown);
+
     return NextResponse.json({
-      markdown,
+      markdown: cleanedMarkdown,
       title,
       author,
       cover,
