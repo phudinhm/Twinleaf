@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Literata } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,16 +13,25 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const literata = Literata({
+  variable: "--font-literata",
+  subsets: ["latin", "latin-ext", "vietnamese"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: "Twinleaf — eBook Translator",
-  description: "Translate eBooks line-by-line with AI",
+  description: "Đọc & Dịch song ngữ sách điện tử với AI văn học đỉnh cao",
+  other: {
+    "theme-color": "#faf8f5",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      lang="vi"
+      className={`${geistSans.variable} ${geistMono.variable} ${literata.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
