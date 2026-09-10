@@ -240,7 +240,7 @@ export default function Home() {
           batch.indices.forEach((chunkIdx, arrayIdx) => {
             currentChunks[chunkIdx] = {
               ...currentChunks[chunkIdx],
-              translated: fixSpacing(translations[arrayIdx] ?? "[Missing]"),
+              translated: translations[arrayIdx] ?? "[Missing]",
             };
             completed++;
           });
