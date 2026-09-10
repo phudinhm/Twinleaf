@@ -3,6 +3,17 @@
 :root {
   --background: #faf8f5;
   --foreground: #2c2418;
+
+  /* Reader theme variables (overridden by data-theme) */
+  --reader-bg: #faf8f5;
+  --reader-header-bg: rgba(255, 255, 255, 0.9);
+  --reader-header-border: #e8ded0;
+  --reader-text: #2c2418;
+  --reader-text-secondary: #7e664e;
+  --reader-quote-border: #dccdbb;
+  --reader-card-bg: #f2ecdf;
+  --reader-highlight: rgba(225, 215, 198, 0.35);
+  --reader-scrollbar: #d4c9bc;
 }
 
 @theme inline {
@@ -10,15 +21,16 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-literata);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
 }
 
-/* Smooth scrollbar */
+/* ─── Smooth Scrollbar ─── */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -26,15 +38,94 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d4c9bc;
+  background: var(--reader-scrollbar);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #b8a99a;
 }
 
-/* Selection color */
+/* ─── Selection ─── */
 ::selection {
   background: #c7e5d0;
   color: #1a1a1a;
+}
+
+/* ─── Transitions ─── */
+.reader-transition {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* ─── Search Highlight ─── */
+mark.search-highlight {
+  background-color: #fde68a;
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+mark.search-highlight-active {
+  background-color: #f59e0b;
+  color: #fff;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* ─── Floating Panel Animation ─── */
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.animate-fade-in-scale {
+  animation: fadeInScale 0.15s ease-out;
+}
+
+/* ─── Slide In from Left ─── */
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.animate-slide-in-left {
+  animation: slideInLeft 0.2s ease-out;
+}
+
+/* ─── Drawer Backdrop ─── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fadeIn 0.15s ease-out;
+}
+
+/* ─── Progress Bar Shimmer ─── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.progress-shimmer {
+  background: linear-gradient(90deg, #10b981 0%, #14b8a6 30%, #34d399 50%, #14b8a6 70%, #10b981 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+/* ─── Paragraph hover action toolbar ─── */
+.chunk-actions {
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.group:hover .chunk-actions,
+.chunk-actions:focus-within {
+  opacity: 1;
+  transform: translateY(0);
 }
