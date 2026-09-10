@@ -326,47 +326,47 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Try selected AI engine
-    const aiTranslate = ENGINE_FNS[selectedEngine] || ENGINE_FNS["qwen"];
+    // Waterfall Translation Chain: NEVER STOPS
+    const chain: string[] = [];
+    if (selectedEngine === "qwen" || selectedEngine === "groq") {
+      chain.push("qwen", "groq-gpt", "gemini");
+    } else if (selectedEngine === "groq-gpt") {
+      chain.push("groq-gpt", "qwen", "gemini");
+    } else if (selectedEngine === "gemini" || selectedEngine === "gemini-pro") {
+      chain.push("gemini", "qwen", "groq-gpt");
+    } else {
+      chain.push(selectedEngine, "qwen", "gemini");
+    }
 
-    if (aiTranslate) {
+    // Try each AI engine in the chain
+    for (const eng of chain) {
+      const fn = ENGINE_FNS[eng];
+      if (!fn) continue;
       try {
-        const translatedText = await aiTranslate(texts, targetLang || "vi");
-        return NextResponse.json({ translatedText, provider: selectedEngine });
-      } catch (aiError: any) {
-        console.warn(`${selectedEngine} API error:`, aiError.message);
-
-        // Check if rate limited (429 or quota)
-        const isRateLimit =
-          aiError.message?.includes("429") ||
-          aiError.message?.includes("Quota exceeded") ||
-          aiError.message?.includes("Rate limit");
-
-        if (isRateLimit) {
-          // Tell frontend to back off and retry with the SAME AI model
-          return NextResponse.json(
-            { error: "AI rate limit reached. Retrying shortly...", isRateLimit: true },
-            { status: 429 }
-          );
+        const translatedText = await fn(texts, targetLang || "vi");
+        if (translatedText && translatedText.length > 0) {
+          return NextResponse.json({ translatedText, provider: eng });
         }
-
-        // If Insufficient Balance (DeepSeek), give clear error message
-        if (aiError.message?.includes("Insufficient Balance")) {
-          return NextResponse.json(
-            { error: "Tài khoản DeepSeek chưa nạp tiền (Số dư = 0). Vui lòng chọn Qwen hoặc Gemini!", isBalanceError: true },
-            { status: 402 }
-          );
-        }
-
-        // Return error rather than secretly downgrading to low-quality scraper
-        return NextResponse.json(
-          { error: `${selectedEngine} error: ${aiError.message}` },
-          { status: 500 }
-        );
+      } catch (err: any) {
+        console.warn(`[Waterfall] Engine ${eng} paused/failed (${err.message?.slice(0, 80)}), trying next AI engine...`);
+        // Continue to next AI engine!
       }
     }
 
-    return NextResponse.json({ error: "Unknown engine" }, { status: 400 });
+    // Ultimate Safety Net: Google Translate Scraper
+    try {
+      const translatedText = await translate(texts, { to: targetLang || "vi" });
+      const cleaned = Array.isArray(translatedText)
+        ? translatedText.map((t: string) => fixPunctuationSpacing(t))
+        : fixPunctuationSpacing(translatedText);
+      return NextResponse.json({ translatedText: cleaned, provider: "google-fallback" });
+    } catch (finalError: any) {
+      console.error("All engines failed:", finalError);
+      return NextResponse.json(
+        { error: "Tất cả các cổng dịch tạm thời bận. Đang thử lại..." },
+        { status: 429 }
+      );
+    }
   } catch (error: any) {
     console.error("Translation error:", error);
     return NextResponse.json(

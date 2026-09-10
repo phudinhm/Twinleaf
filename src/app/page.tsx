@@ -140,7 +140,7 @@ export default function Home() {
     setIsTranslating(true);
     let currentChunks = [...initialChunks];
     let completed = 0;
-    const BATCH_SIZE = 4;
+    const BATCH_SIZE = 3;
     const PARALLEL = 1;
 
     type Batch = { indices: number[]; texts: string[] };
@@ -176,13 +176,6 @@ export default function Home() {
           });
           clearTimeout(timeoutId);
 
-          if (res.status === 402) {
-            const errData = await res.json();
-            throw new Error(errData.error || "Số dư không đủ");
-          }
-          if (res.status === 429) {
-            throw new Error("RATE_LIMIT_429");
-          }
           if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
             throw new Error(errData.error || "Translation request failed");
@@ -193,8 +186,6 @@ export default function Home() {
       );
 
       let needsRetry = false;
-      let stopEntirely = false;
-      let stopMessage = "";
 
       for (const r of results) {
         if (r.status === "fulfilled") {
@@ -208,31 +199,20 @@ export default function Home() {
             completed++;
           });
         } else {
-          const reason = r.reason?.message || "";
-          if (reason.includes("Số dư")) {
-            stopEntirely = true;
-            stopMessage = reason;
-          } else {
-            console.warn("Batch failed, will retry:", reason);
-            needsRetry = true;
-          }
+          console.warn("Batch failed, will retry:", r.reason?.message);
+          needsRetry = true;
         }
       }
 
       setChunks([...currentChunks]);
       setProgress(Math.round((completed / currentChunks.length) * 100));
 
-      if (stopEntirely) {
-        alert(stopMessage);
-        break;
-      }
-
       if (needsRetry) {
         const failed = wave.filter((_, i) => results[i].status === "rejected");
         allBatches.splice(w + PARALLEL, 0, ...failed);
-        await new Promise((r) => setTimeout(r, 10000));
+        await new Promise((r) => setTimeout(r, 3000));
       } else {
-        await new Promise((r) => setTimeout(r, 600));
+        await new Promise((r) => setTimeout(r, 400));
       }
     }
 
