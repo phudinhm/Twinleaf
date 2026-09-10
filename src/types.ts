@@ -61,3 +61,23 @@ export const THEME_MAP: Record<Theme, ThemeColors> = {
     highlightBg: "rgba(39, 39, 42, 0.5)",
   },
 };
+
+export interface SavedBook {
+  id: string;
+  title: string;
+  author: string;
+  cover: string | null;
+  targetLang: string;
+  lastReadAt: number;
+  chunks: BookChunk[];
+}
+
+export interface LibraryBookMeta {
+  id: string;
+  title: string;
+  author: string;
+  cover: string | null;
+  targetLang: string;
+  lastReadAt: number;
+  progress: number;
+}

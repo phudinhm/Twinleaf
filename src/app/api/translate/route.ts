@@ -69,13 +69,13 @@ function parseTranslationResponse(response: string, originalTexts: string[]): st
   return translated;
 }
 
-// ── Gemini 3.6 Flash (Fast & Great) ──
+// ── Gemini 1.5 Flash (Fast & Great) ──
 async function translateWithGeminiFlash(texts: string[], targetLang: string): Promise<string[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY not set");
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
   const langName = LANG_NAMES[targetLang] || targetLang;
 
   const result = await model.generateContent(buildTranslationPrompt(texts, langName));
@@ -141,7 +141,7 @@ async function translateWithGroqQwen(texts: string[], targetLang: string): Promi
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "qwen/qwen3.8-27b",
+      model: "qwen-2.5-32b",
       messages: [
         { role: "system", content: "You are an award-winning literary translator and novelist." },
         { role: "user", content: buildTranslationPrompt(texts, langName) },
@@ -151,8 +151,8 @@ async function translateWithGroqQwen(texts: string[], targetLang: string): Promi
   });
 
   if (!res.ok) {
-    if (res.status === 429) {
-      console.log("Qwen rate limited, auto-switching to Groq GPT-OSS 120B...");
+    if (res.status === 429 || res.status === 404) {
+      console.log("Qwen rate limited or invalid, auto-switching to Llama 3.3 70B...");
       return translateWithGroqGPT(texts, targetLang);
     }
     const errText = await res.text();
@@ -162,7 +162,7 @@ async function translateWithGroqQwen(texts: string[], targetLang: string): Promi
   return parseTranslationResponse(data.choices[0].message.content, texts);
 }
 
-// ── Groq GPT-OSS 120B (Massive 120B Open Foundation Model) ──
+// ── Groq Llama 3.3 70B (Massive Open Foundation Model) ──
 async function translateWithGroqGPT(texts: string[], targetLang: string): Promise<string[]> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("GROQ_API_KEY not set");
@@ -176,7 +176,7 @@ async function translateWithGroqGPT(texts: string[], targetLang: string): Promis
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "openai/gpt-oss-120b",
+      model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: "You are an award-winning literary translator and novelist." },
         { role: "user", content: buildTranslationPrompt(texts, langName) },

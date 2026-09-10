@@ -13,6 +13,7 @@ interface ParagraphPairProps {
   themeColors: ThemeColors;
   isTranslating: boolean;
   isActive: boolean;
+  isTTSActive: boolean;
   isCopied: boolean;
   isSpeaking: boolean;
   searchQuery: string;
@@ -45,6 +46,7 @@ function ParagraphPairInner({
   themeColors,
   isTranslating,
   isActive,
+  isTTSActive,
   isCopied,
   isSpeaking,
   searchQuery,
@@ -135,9 +137,9 @@ function ParagraphPairInner({
         onClick={handleClick}
         className={`grid grid-cols-1 md:grid-cols-2 gap-6 p-3 rounded-2xl transition border-b border-dashed relative group ${
           isActive ? "ring-1 ring-emerald-500/40" : ""
-        }`}
+        } ${isTTSActive ? "ring-2 ring-emerald-500 bg-emerald-50/30" : ""}`}
         style={{
-          backgroundColor: isActive ? themeColors.highlightBg : "transparent",
+          backgroundColor: isActive && !isTTSActive ? themeColors.highlightBg : isTTSActive ? undefined : "transparent",
           borderColor: themeColors.headerBorder,
         }}
       >
@@ -175,8 +177,8 @@ function ParagraphPairInner({
       onClick={handleClick}
       className={`p-3 rounded-2xl transition relative group ${
         isActive ? "ring-1 ring-emerald-500/40" : ""
-      }`}
-      style={{ backgroundColor: isActive ? themeColors.highlightBg : "transparent" }}
+      } ${isTTSActive ? "ring-2 ring-emerald-500 bg-emerald-50/30" : ""}`}
+      style={{ backgroundColor: isActive && !isTTSActive ? themeColors.highlightBg : isTTSActive ? undefined : "transparent" }}
     >
       {layout !== "translated_only" && (
         <div
@@ -228,6 +230,7 @@ const ParagraphPair = React.memo(ParagraphPairInner, (prev, next) => {
     prev.themeColors === next.themeColors &&
     prev.isTranslating === next.isTranslating &&
     prev.isActive === next.isActive &&
+    prev.isTTSActive === next.isTTSActive &&
     prev.isCopied === next.isCopied &&
     prev.isSpeaking === next.isSpeaking &&
     prev.searchQuery === next.searchQuery
