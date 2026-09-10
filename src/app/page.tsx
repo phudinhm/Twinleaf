@@ -83,13 +83,58 @@ export default function Home() {
 
   const handleDragLeave = useCallback(() => setIsDragging(false), []);
 
-  const fixSpacing = (text: string): string => {
-    if (!text) return text;
-    return text
+  const cleanEbookText = (text: string): string => {
+    if (!text) return "";
+    let s = text;
+
+    // 1. Remove XML declarations, DOCTYPE, metadata, and structural tags
+    s = s.replace(/<\?xml[^>]*\?>/gi, "");
+    s = s.replace(/<!DOCTYPE[^>]*>/gi, "");
+    s = s.replace(/<package[\s\S]*?<\/package>/gi, "");
+    s = s.replace(/<metadata[\s\S]*?<\/metadata>/gi, "");
+    s = s.replace(/<manifest[\s\S]*?<\/manifest>/gi, "");
+    s = s.replace(/<spine[\s\S]*?<\/spine>/gi, "");
+    s = s.replace(/<guide[\s\S]*?<\/guide>/gi, "");
+    s = s.replace(/<nav[\s\S]*?<\/nav>/gi, "");
+    s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
+    s = s.replace(/<script[\s\S]*?<\/script>/gi, "");
+
+    // 2. Remove XML attributes like xmlns, epub:type, xml:lang
+    s = s.replace(/\s*(xmlns(:[a-z0-9]+)?|xml:lang|epub:type)=["'][^"']*["']/gi, "");
+
+    // 3. Remove raw HTML/XML tags (keeping inner text)
+    s = s.replace(/<[^>]+>/g, "");
+
+    // 4. Decode common HTML entities
+    s = s
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&mdash;/gi, "—")
+      .replace(/&ndash;/gi, "–");
+
+    // 5. Fix sentence spacing after punctuation
+    s = s
       .replace(/([.!?\u2026:;])([A-Z\u00C0-\u024F\u1EA0-\u1EF9\u201C\u0022\u0027\u2018])/gu, "$1 $2")
       .replace(/([\p{L}\d][.!?\u2026])([\p{L}])/gu, "$1 $2")
-      .replace(/ {2,}/g, " ")
-      .trim();
+      .replace(/ {2,}/g, " ");
+
+    return s.trim();
+  };
+
+  const isJunkChunk = (text: string): boolean => {
+    if (!text || text.length === 0) return true;
+    // Check if it's leftover CSS rules like body { ... } or .calibre { ... }
+    if (text.match(/^[a-z0-9_#.-]+\s*\{[^}]*\}/i)) return true;
+    if (text.match(/^@(page|namespace|font-face)/i)) return true;
+    // Check if it's an XML namespace remnant
+    if (text.match(/^(xmlns|epub:|xml:)/i)) return true;
+    // Check if it contains no actual text (only punctuation/symbols)
+    if (!text.match(/[\p{L}\d]/u)) return true;
+    return false;
   };
 
   const handleUploadAndParse = async () => {
@@ -117,12 +162,13 @@ export default function Home() {
       let idCounter = 0;
       const initialChunks: BookChunk[] = rawChunks
         .map((text: string) => {
-          const cleaned = fixSpacing(text);
-          if (!cleaned) return null;
+          const isHeading = text.trim().startsWith("#");
+          const cleaned = cleanEbookText(text);
+          if (!cleaned || isJunkChunk(cleaned)) return null;
           return {
             id: idCounter++,
-            original: cleaned,
-            isHeading: cleaned.startsWith("#"),
+            original: isHeading && !cleaned.startsWith("#") ? `# ${cleaned}` : cleaned,
+            isHeading: isHeading || cleaned.startsWith("#"),
           };
         })
         .filter((c: BookChunk | null): c is BookChunk => c !== null);
