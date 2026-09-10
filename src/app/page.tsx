@@ -119,8 +119,8 @@ export default function Home() {
     setIsTranslating(true);
     let currentChunks = [...initialChunks];
     let completed = 0;
-    const BATCH_SIZE = 8;
-    const PARALLEL = 3;
+    const BATCH_SIZE = 4;
+    const PARALLEL = 1;
 
     type Batch = { indices: number[]; texts: string[] };
     const allBatches: Batch[] = [];
@@ -146,7 +146,7 @@ export default function Home() {
       const results = await Promise.allSettled(
         wave.map(async (batch) => {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 35000);
+          const timeoutId = setTimeout(() => controller.abort(), 40000);
           const res = await fetch("/api/translate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -154,14 +154,27 @@ export default function Home() {
             signal: controller.signal,
           });
           clearTimeout(timeoutId);
-          if (res.status === 429 || res.status >= 500) throw new Error(`API_${res.status}`);
-          if (!res.ok) throw new Error("Unknown error");
+
+          if (res.status === 402) {
+            const errData = await res.json();
+            throw new Error(errData.error || "Số dư không đủ");
+          }
+          if (res.status === 429) {
+            throw new Error("RATE_LIMIT_429");
+          }
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || "Translation request failed");
+          }
           const { translatedText } = await res.json();
           return { batch, translatedText };
         })
       );
 
       let needsRetry = false;
+      let stopEntirely = false;
+      let stopMessage = "";
+
       for (const r of results) {
         if (r.status === "fulfilled") {
           const { batch, translatedText } = r.value;
@@ -174,20 +187,33 @@ export default function Home() {
             completed++;
           });
         } else {
-          console.warn("Batch failed:", r.reason?.message);
-          needsRetry = true;
+          const reason = r.reason?.message || "";
+          if (reason.includes("Số dư")) {
+            stopEntirely = true;
+            stopMessage = reason;
+          } else {
+            console.warn("Batch failed, will retry:", reason);
+            needsRetry = true;
+          }
         }
       }
 
       setChunks([...currentChunks]);
       setProgress(Math.round((completed / currentChunks.length) * 100));
 
+      if (stopEntirely) {
+        alert(stopMessage);
+        break;
+      }
+
       if (needsRetry) {
         const failed = wave.filter((_, i) => results[i].status === "rejected");
         allBatches.splice(w + PARALLEL, 0, ...failed);
-        await new Promise((r) => setTimeout(r, 4000));
+        // Wait 10s for token limit cooldown before retrying
+        await new Promise((r) => setTimeout(r, 10000));
       } else {
-        await new Promise((r) => setTimeout(r, 300));
+        // Natural small delay between requests to stay well within limits
+        await new Promise((r) => setTimeout(r, 600));
       }
     }
 
@@ -315,9 +341,10 @@ export default function Home() {
                   <option value="qwen">🌸 Qwen 3.8 (Groq) — Dịch văn học thơ mộng nhất (Siêu tốc)</option>
                   <option value="groq-gpt">🌟 GPT-OSS 120B (Groq) — Trí tuệ 120B tham số (Siêu tốc)</option>
                   <option value="gemini">⚡ Gemini 3.6 Flash (Google AI) — Tự nhiên & Hiện đại</option>
-                  <option value="deepseek">🧠 DeepSeek V3 (Cần số dư tài khoản)</option>
-                  <option value="claude">👑 Claude 3.5 Sonnet (Đỉnh cao thế giới)</option>
+                  <option value="claude">👑 Claude 3.5 Sonnet (Đỉnh cao văn học thế giới)</option>
                   <option value="openai">🤖 OpenAI GPT-4o</option>
+                  <option value="openrouter">🌐 OpenRouter (Dùng Claude / GPT / DeepSeek R1)</option>
+                  <option value="deepseek">🧠 DeepSeek V3 (Cần số dư tài khoản)</option>
                   <option value="google">🔤 Google Translate (Cơ bản)</option>
                 </select>
               </div>

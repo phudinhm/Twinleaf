@@ -253,6 +253,39 @@ async function translateWithOpenAI(texts: string[], targetLang: string): Promise
   return parseTranslationResponse(data.choices[0].message.content, texts);
 }
 
+// ── OpenRouter (Access Claude 3.5, GPT-4o, DeepSeek R1 with 1 key) ──
+async function translateWithOpenRouter(texts: string[], targetLang: string): Promise<string[]> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
+
+  const langName = LANG_NAMES[targetLang] || targetLang;
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": "http://localhost:3000",
+      "X-Title": "Twinleaf eBook Translator",
+    },
+    body: JSON.stringify({
+      model: "anthropic/claude-3.5-sonnet",
+      messages: [
+        { role: "system", content: "You are an elite literary translator into " + langName },
+        { role: "user", content: buildTranslationPrompt(texts, langName) },
+      ],
+      temperature: 0.3,
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`OpenRouter API error (${res.status}): ${errText}`);
+  }
+  const data = await res.json();
+  return parseTranslationResponse(data.choices[0].message.content, texts);
+}
+
 const ENGINE_FNS: Record<string, (texts: string[], lang: string) => Promise<string[]>> = {
   qwen: translateWithGroqQwen,
   groq: translateWithGroqQwen,
@@ -262,6 +295,7 @@ const ENGINE_FNS: Record<string, (texts: string[], lang: string) => Promise<stri
   deepseek: translateWithDeepSeek,
   claude: translateWithClaude,
   openai: translateWithOpenAI,
+  openrouter: translateWithOpenRouter,
 };
 
 export async function POST(req: NextRequest) {
@@ -273,42 +307,62 @@ export async function POST(req: NextRequest) {
     }
 
     const texts = Array.isArray(text) ? text : [text];
+    const selectedEngine = engine || "qwen";
 
-    // 1. Try requested engine
-    const selectedEngine = engine || "gemini-pro";
-    const aiTranslate = ENGINE_FNS[selectedEngine] || ENGINE_FNS["gemini"];
+    // If Google Translate is explicitly selected:
+    if (selectedEngine === "google") {
+      try {
+        const translatedText = await translate(texts, { to: targetLang || "vi" });
+        const cleaned = Array.isArray(translatedText)
+          ? translatedText.map((t: string) => fixPunctuationSpacing(t))
+          : fixPunctuationSpacing(translatedText);
+        return NextResponse.json({ translatedText: cleaned, provider: "google-translate" });
+      } catch (apiError: any) {
+        return NextResponse.json({ error: "Google Translate rate limited: " + apiError.message }, { status: 429 });
+      }
+    }
+
+    // Try selected AI engine
+    const aiTranslate = ENGINE_FNS[selectedEngine] || ENGINE_FNS["qwen"];
 
     if (aiTranslate) {
       try {
         const translatedText = await aiTranslate(texts, targetLang || "vi");
         return NextResponse.json({ translatedText, provider: selectedEngine });
       } catch (aiError: any) {
-        console.warn(`${selectedEngine} failed, trying fallback:`, aiError.message);
+        console.warn(`${selectedEngine} API error:`, aiError.message);
 
-        // Fallback 1: If pro failed, try Gemini Flash
-        if (selectedEngine === "gemini-pro" && process.env.GEMINI_API_KEY) {
-          try {
-            const translatedText = await translateWithGeminiFlash(texts, targetLang || "vi");
-            return NextResponse.json({ translatedText, provider: "gemini-flash" });
-          } catch (e) {}
+        // Check if rate limited (429 or quota)
+        const isRateLimit =
+          aiError.message?.includes("429") ||
+          aiError.message?.includes("Quota exceeded") ||
+          aiError.message?.includes("Rate limit");
+
+        if (isRateLimit) {
+          // Tell frontend to back off and retry with the SAME AI model
+          return NextResponse.json(
+            { error: "AI rate limit reached. Retrying shortly...", isRateLimit: true },
+            { status: 429 }
+          );
         }
+
+        // If Insufficient Balance (DeepSeek), give clear error message
+        if (aiError.message?.includes("Insufficient Balance")) {
+          return NextResponse.json(
+            { error: "Tài khoản DeepSeek chưa nạp tiền (Số dư = 0). Vui lòng chọn Qwen hoặc Gemini!", isBalanceError: true },
+            { status: 402 }
+          );
+        }
+
+        // Return error rather than secretly downgrading to low-quality scraper
+        return NextResponse.json(
+          { error: `${selectedEngine} error: ${aiError.message}` },
+          { status: 500 }
+        );
       }
     }
 
-    // Fallback 2: Google Translate scraper
-    try {
-      const translatedText = await translate(texts, { to: targetLang || "vi" });
-      const cleaned = Array.isArray(translatedText)
-        ? translatedText.map((t: string) => fixPunctuationSpacing(t))
-        : fixPunctuationSpacing(translatedText);
-      return NextResponse.json({ translatedText: cleaned, provider: "google-translate" });
-    } catch (apiError: any) {
-      console.warn("Translation API failed:", apiError.message);
-      return NextResponse.json(
-        { error: "API Rate limited or failed. " + apiError.message },
-        { status: 429 }
-      );
-    }
+    return NextResponse.json({ error: "Unknown engine" }, { status: 400 });
   } catch (error: any) {
     console.error("Translation error:", error);
     return NextResponse.json(
